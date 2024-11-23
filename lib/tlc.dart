@@ -4,10 +4,10 @@ import 'package:ffi/ffi.dart';
 import 'dart:ffi';
 
 class TlcCalc {
-  final dylib = Platform.isAndroid
+  static final dylib = Platform.isAndroid
       ? DynamicLibrary.open("libOpenCV_ffi.so")
       : DynamicLibrary.process();
-  File calculateTLC(File imagePathtoCalc) {
+  static File calculateTLC(File imagePathtoCalc) {
     final imagePath = imagePathtoCalc.path.toNativeUtf8();
     final imageFfi = dylib.lookupFunction<Bool Function(Pointer<Utf8>),
         bool Function(Pointer<Utf8>)>('detect_contour_tlc');
@@ -21,7 +21,7 @@ class TlcCalc {
 //ffi
   }
 
-  void saveImage(String finalImage, filePath) async {
+  static void saveImage(String finalImage, filePath) async {
     await File(filePath).writeAsBytes(File(finalImage).readAsBytesSync());
   }
 }

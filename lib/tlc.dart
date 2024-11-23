@@ -10,7 +10,7 @@ class TlcCalc {
   static File calculateTLC(File imagePathtoCalc) {
     final imagePath = imagePathtoCalc.path.toNativeUtf8();
     final imageFfi = dylib.lookupFunction<Bool Function(Pointer<Utf8>),
-        bool Function(Pointer<Utf8>)>('detect_contour_tlc');
+        bool Function(Pointer<Utf8>)>('detect_contour_tlcc');
     if (imageFfi(imagePath)) {
       saveImage(imagePath.toDartString(), imagePathtoCalc.path);
       return File(imagePath.toDartString());

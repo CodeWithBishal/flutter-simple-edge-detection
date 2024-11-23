@@ -1,164 +1,135 @@
 #include <opencv2/opencv.hpp>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/highgui.hpp>
-#include <opencv2/core.hpp>
-#include <opencv2/imgcodecs.hpp>
-#include <iostream>
-#include <vector>
 #include <numeric>
-
+#include <sstream>
+#include <iomanip>
 using namespace cv;
-using namespace std;
 
-Mat crop_image(const Mat& image, double left_pct, double right_pct, double top_pct, double bottom_pct) {
-    int height = image.rows;
-    int width = image.cols;
-    int left = static_cast<int>(width * left_pct);
-    int right = static_cast<int>(width * right_pct);
-    int top = static_cast<int>(height * top_pct);
-    int bottom = static_cast<int>(height * bottom_pct);
-    Rect cropped_region(left, top, width - left - right, height - top - bottom);
-    return image(cropped_region);
-}
+bool detect_contour_tlc(char *path) {
+    Mat img = imread(path);
 
-pair<Mat, Mat> load_and_preprocess_image(const Mat& img) {
-    Mat cropped_img = crop_image(img, 0.10, 0.10, 0.05, 0.05);
-    Mat resized_img;
-    resize(cropped_img, resized_img, Size(256, 500));
-    Mat gray_image;
-    cvtColor(resized_img, gray_image, COLOR_BGR2GRAY);
-    Mat blurred_image;
-    GaussianBlur(gray_image, blurred_image, Size(5, 5), 0);
-    return make_pair(resized_img, blurred_image);
-}
-
-Mat compute_gradients(const Mat& blurred_image) {
-    Mat gradient_x, gradient_y;
-    Scharr(blurred_image, gradient_x, CV_64F, 1, 0);
-    Scharr(blurred_image, gradient_y, CV_64F, 0, 1);
-    Mat gradient_magnitude;
-    magnitude(gradient_x, gradient_y, gradient_magnitude);
-    return gradient_magnitude;
-}
-
-vector<Rect> find_contours(const Mat& gradient_magnitude, double thresh_value, double min_area_threshold) {
-    Mat high_contrast_areas;
-    threshold(gradient_magnitude, high_contrast_areas, thresh_value, 255, THRESH_BINARY);
-    high_contrast_areas.convertTo(high_contrast_areas, CV_8U);
-    vector<vector<Point>> contours;
-    findContours(high_contrast_areas, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
-    vector<Rect> rectangles;
-    for (const auto& contour : contours) {
-        double area = contourArea(contour);
-        if (area > min_area_threshold) {
-            Rect rect = boundingRect(contour);
-            rectangles.push_back(rect);
-        }
+    //Check for black color
+    Mat hsvImage;
+    cvtColor(img, hsvImage, COLOR_BGR2HSV);
+    Mat mask;
+    inRange(hsvImage, Scalar(0, 0, 0), Scalar(180, 255, 50), mask); // Threshold for black color
+    if (countNonZero(mask) > 0) {
+        return false; // Return false if black color is found
     }
-    return rectangles;
-}
 
-vector<Rect> non_max_suppression(const vector<Rect>& rectangles, double overlap_thresh) {
-    if (rectangles.empty()) return {};
+    resize(img, img, Size(256, 500));
+    Mat grayImage, blurredImage;
+    cvtColor(img, grayImage, COLOR_BGR2GRAY);
+    GaussianBlur(grayImage, blurredImage, Size(5, 5), 0);
 
-    vector<int> pick;
-    vector<int> idxs(rectangles.size());
-    iota(idxs.begin(), idxs.end(), 0);
+    Mat gradientX, gradientY, gradientMagnitude;
+    Scharr(blurredImage, gradientX, CV_64F, 1, 0);
+    Scharr(blurredImage, gradientY, CV_64F, 0, 1);
+    magnitude(gradientX, gradientY, gradientMagnitude);
 
-    sort(idxs.begin(), idxs.end(), [&rectangles](int i1, int i2) {
-        return rectangles[i1].br().y < rectangles[i2].br().y;
-    });
+    int initialThreshold = 50;
+    int initialMinAreaThreshold = 200;
+    int numRectangles = 0;
+    int minRequiredRectangles = 7;
+    int minRequiredArea = 250;
 
-    while (!idxs.empty()) {
-        int last = idxs.size() - 1;
-        int i = idxs[last];
-        pick.push_back(i);
-        vector<int> suppress = {last};
+    std::vector<Point> prevTextPositions;
 
-        for (int pos = 0; pos < last; ++pos) {
-            int j = idxs[pos];
-            int xx1 = max(rectangles[i].x, rectangles[j].x);
-            int yy1 = max(rectangles[i].y, rectangles[j].y);
-            int xx2 = min(rectangles[i].br().x, rectangles[j].br().x);
-            int yy2 = min(rectangles[i].br().y, rectangles[j].br().y);
-            int w = max(0, xx2 - xx1 + 1);
-            int h = max(0, yy2 - yy1 + 1);
-            double overlap = static_cast<double>(w * h) / (rectangles[j].area());
+    while (numRectangles < minRequiredRectangles) {
+        int threshold = initialThreshold;
+        int minAreaThreshold = initialMinAreaThreshold;
+        Mat highContrastAreas = gradientMagnitude > threshold;
+        std::vector<std::vector<Point>> contours;
+        findContours(highContrastAreas.clone(), contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
 
-            if (overlap > overlap_thresh) {
-                suppress.push_back(pos);
+        std::vector<Rect> rectangles;
+        for (auto& contour : contours) {
+            double area = contourArea(contour);
+            if (area > minAreaThreshold) {
+                Rect rect = boundingRect(contour);
+                rectangles.push_back(rect);
             }
         }
 
-        for (int pos = suppress.size() - 1; pos >= 0; --pos) {
-            idxs.erase(idxs.begin() + suppress[pos]);
-        }
-    }
-
-    vector<Rect> result;
-    for (int i : pick) {
-        result.push_back(rectangles[i]);
-    }
-    return result;
-}
-
-void draw_text(Mat& image, int x, int y, int x2, int y2, double y_normalized) {
-    string text = format("%.2f", y_normalized);
-    int font_face = FONT_HERSHEY_SIMPLEX;
-    double font_scale = 0.5;
-    int thickness = 1;
-    int baseline = 0;
-    Size text_size = getTextSize(text, font_face, font_scale, thickness, &baseline);
-    Point text_org((x + x2 - text_size.width) / 2, y - text_size.height - 5);
-    putText(image, text, text_org, font_face, font_scale, Scalar(255, 0, 0), thickness);
-}
-
-void draw_rectangles(Mat& image, const vector<Rect>& rectangles, double min_required_area, double max_aspect_ratio) {
-    for (const auto& rect : rectangles) {
-        double aspect_ratio = static_cast<double>(rect.width) / rect.height;
-        double area = rect.area();
-        if (aspect_ratio <= max_aspect_ratio && area > min_required_area) {
-            rectangle(image, rect, Scalar(0, 255, 0), 2);
-            Point center((rect.x + rect.br().x) / 2, (rect.y + rect.br().y) / 2);
-            circle(image, center, 1, Scalar(0, 0, 255), -1);
-            double y_normalized = 1.0 - static_cast<double>(center.y) / 500;
-            draw_text(image, rect.x, rect.y, rect.br().x, rect.br().y, y_normalized);
-        }
-    }
-}
-extern "C" __attribute__((visibility("default"))) __attribute__((used))
-bool detect_contour_tlcc(char *path) {
-    Mat img = imread(path);
-    cout << "Processing image at path: " << path << endl;
-    if (img.empty()) {
-        cerr << "Error: Could not open or find the image!" << endl;
-        return false;
-    }
-
-    try {
-        pair<Mat, Mat> result = load_and_preprocess_image(img);
-        Mat resized_img = result.first;
-        Mat blurred_image = result.second;
-        
-        Mat gradient_magnitude = compute_gradients(blurred_image);
-        double initial_threshold = 50;
-        double initial_min_area_threshold = 200;
-        int min_required_rectangles = 7;
-        double min_required_area = 250;
-        double max_aspect_ratio = 3;
-
-        int num_rectangles = 0;
-        while (num_rectangles < min_required_rectangles) {
-            vector<Rect> rectangles = find_contours(gradient_magnitude, initial_threshold, initial_min_area_threshold);
-            rectangles = non_max_suppression(rectangles, 0.2);
-            draw_rectangles(resized_img, rectangles, min_required_area, max_aspect_ratio);
-            num_rectangles = rectangles.size();
-            initial_min_area_threshold -= 100;
+        // Non-maximum suppression
+        std::vector<int> pick;
+        std::vector<int> x1, y1, x2, y2, area;
+        for (const auto& rect : rectangles) {
+            x1.push_back(rect.x);
+            y1.push_back(rect.y);
+            x2.push_back(rect.x + rect.width);
+            y2.push_back(rect.y + rect.height);
+            area.push_back(rect.width * rect.height);
         }
 
-        return true;
-    } catch (const exception& e) {
-        cerr << "Error: " << e.what() << endl;
-        return false;
+        std::vector<int> idxs(area.size());
+        std::iota(idxs.begin(), idxs.end(), 0);
+
+        sort(idxs.begin(), idxs.end(), [&](int i, int j) {
+            return y2[i] > y2[j];
+        });
+
+        while (!idxs.empty()) {
+            int last = idxs.size() - 1;
+            int i = idxs[last];
+            pick.push_back(i);
+            std::vector<int> suppress = {last};
+            for (int pos = 0; pos < last; pos++) {
+                int j = idxs[pos];
+                int xx1 = max(x1[i], x1[j]);
+                int yy1 = max(y1[i], y1[j]);
+                int xx2 = min(x2[i], x2[j]);
+                int yy2 = min(y2[i], y2[j]);
+                int w = max(0, xx2 - xx1 + 1);
+                int h = max(0, yy2 - yy1 + 1);
+                double overlap = static_cast<double>(w * h) / area[j];
+
+                if (overlap > 0.2) {
+                    suppress.push_back(pos);
+                }
+            }
+            idxs.erase(idxs.begin() + suppress.back());
+            suppress.pop_back();
+        }
+
+        for (int i : pick) {
+            int x = rectangles[i].x;
+            int y = rectangles[i].y;
+            int x2 = rectangles[i].x + rectangles[i].width;
+            int y2 = rectangles[i].y + rectangles[i].height;
+            int centerX = (x + x2) / 2;
+            int centerY = (y + y2) / 2;
+
+            bool overlapDetected = any_of(prevTextPositions.begin(), prevTextPositions.end(), [&](const Point& prev) {
+                return abs(prev.x - centerX) < 5 && abs(prev.y - centerY) < 5;
+            });
+
+            if (!overlapDetected) {
+                circle(img, Point(centerX, centerY), 5, Scalar(0, 0, 255), -1);
+
+                double yNormalized = 1.0 - static_cast<double>(centerY) / 500;
+
+                std::stringstream ss;
+                ss << std::fixed << std::setprecision(2) << yNormalized;
+                String text = ss.str();
+
+                int baseline = 0;
+                Size textSize = getTextSize(text, FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseline);
+                Point textOrigin(x + (rectangles[i].width - textSize.width) / 2, y - baseline);
+
+                overlapDetected = any_of(prevTextPositions.begin(), prevTextPositions.end(), [&](const Point& prev) {
+                    return abs(prev.x - textOrigin.x) < textSize.width && abs(prev.y - textOrigin.y) < textSize.height;
+                });
+
+                if (!overlapDetected) {
+                    putText(img, text, textOrigin, FONT_HERSHEY_SIMPLEX, 0.5, Scalar(255, 0, 0));
+                    prevTextPositions.push_back(textOrigin);
+                }
+            }
+        }
+        numRectangles = pick.size();
+        initialMinAreaThreshold -= 10;
     }
+
+    imwrite(path, img);
+    return true;
 }

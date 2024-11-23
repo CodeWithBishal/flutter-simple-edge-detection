@@ -1,15 +1,15 @@
-group 'dev.flutterclutter.simple_edge_detection'
+group = "dev.flutterclutter.simple_edge_detection"
 version '1.0-SNAPSHOT'
 
 buildscript {
-    ext.kotlin_version = '1.7.10'
+    ext.kotlin_version = "1.8.22"
     repositories {
         google()
         jcenter()
     }
 
     dependencies {
-        classpath 'com.android.tools.build:gradle:7.2.2'
+        classpath("com.android.tools.build:gradle:8.1.0")
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
@@ -25,36 +25,63 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
 android {
-    compileSdkVersion 28
+    if (project.android.hasProperty("namespace")) {
+        namespace = "dev.flutterclutter.simple_edge_detection"
+    }
+
+    compileSdk = 34
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_1_8
+    }
 
     sourceSets {
-        main.java.srcDirs += 'src/main/kotlin'
+        main.java.srcDirs += "src/main/kotlin"
+        test.java.srcDirs += "src/test/kotlin"
     }
+
     defaultConfig {
-        minSdkVersion 16
+        minSdk = 21
     }
-    lintOptions {
-        disable 'InvalidPackage'
-    }
+
     defaultConfig {
         externalNativeBuild {
             cmake {
                 // Enabling exceptions, RTTI
                 // And setting C++ standard version
-                cppFlags '-frtti -fexceptions -std=c++17'
+                cppFlags '-frtti -fexceptions -std=c++11'
 
                 // Shared runtime for shared libraries
                 arguments "-DANDROID_STL=c++_shared"
             }
         }
     }
+
     externalNativeBuild {
         cmake {
             path "CMakeLists.txt"
         }
     }
-}
 
-dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
+    dependencies {
+        testImplementation("org.jetbrains.kotlin:kotlin-test")
+        testImplementation("org.mockito:mockito-core:5.0.0")
+    }
+
+    testOptions {
+        unitTests.all {
+            useJUnitPlatform()
+
+            testLogging {
+                events "passed", "skipped", "failed", "standardOut", "standardError"
+                outputs.upToDateWhen {false}
+                showStandardStreams = true
+            }
+        }
+    }
 }

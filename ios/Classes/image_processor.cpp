@@ -11,34 +11,42 @@ Point2f computePoint(int p1, int p2) {
 }
 
 Mat ImageProcessor::process_image(Mat img, float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4) {
-    cvtColor(img, img, COLOR_BGR2GRAY);
+    // Remove the conversion to grayscale
     Mat dst = ImageProcessor::crop_and_transform(img, x1, y1, x2, y2, x3, y3, x4, y4);
-    adaptiveThreshold(dst, dst, 255, cv::ADAPTIVE_THRESH_MEAN_C, cv::THRESH_BINARY, 53, 10);
-
-    return dst;
+    return dst; // Return the cropped color image
 }
 
 Mat ImageProcessor::crop_and_transform(Mat img, float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4) {
-    float w1 = sqrt( pow(x4 - x3 , 2) + pow(x4 - x3, 2));
-    float w2 = sqrt( pow(x2 - x1 , 2) + pow(x2-x1, 2));
-    float h1 = sqrt( pow(y2 - y4 , 2) + pow(y2 - y4, 2));
-    float h2 = sqrt( pow(y1 - y3 , 2) + pow(y1-y3, 2));
+    vector<Point2f> img_pts;
+    img_pts.push_back(computePoint(x1, y1));
+    img_pts.push_back(computePoint(x2, y2));
+    img_pts.push_back(computePoint(x3, y3));
+    img_pts.push_back(computePoint(x4, y4));
 
-    float maxWidth = (w1 < w2) ? w1 : w2;
-    float maxHeight = (h1 < h2) ? h1 : h2;
+    // Calculate bounding box
+    float minX = std::numeric_limits<float>::max();
+    float minY = std::numeric_limits<float>::max();
+    float maxX = std::numeric_limits<float>::min();
+    float maxY = std::numeric_limits<float>::min();
 
-    Mat dst = Mat::zeros(maxHeight, maxWidth, CV_8UC1);
+    for (const auto& pt : img_pts) {
+        minX = std::min(minX, pt.x);
+        minY = std::min(minY, pt.y);
+        maxX = std::max(maxX, pt.x);
+        maxY = std::max(maxY, pt.y);
+    }
 
-    vector<Point2f> dst_pts; vector<Point2f> img_pts;
+    float width = maxX - minX;
+    float height = maxY - minY;
+
+    // Set destination image size based on the bounding box
+    Mat dst = Mat::zeros(height, width, CV_8UC3);
+
+    vector<Point2f> dst_pts;
     dst_pts.push_back(Point(0, 0));
-    dst_pts.push_back(Point(maxWidth - 1, 0));
-    dst_pts.push_back(Point(0, maxHeight - 1));
-    dst_pts.push_back(Point(maxWidth - 1, maxHeight - 1));
-
-    img_pts.push_back(computePoint(x1,y1));
-    img_pts.push_back(computePoint(x2,y2));
-    img_pts.push_back(computePoint(x3,y3));
-    img_pts.push_back(computePoint(x4,y4));
+    dst_pts.push_back(Point(width - 1, 0));
+    dst_pts.push_back(Point(0, height - 1));
+    dst_pts.push_back(Point(width - 1, height - 1));
 
     Mat transformation_matrix = getPerspectiveTransform(img_pts, dst_pts);
     warpPerspective(img, dst, transformation_matrix, dst.size());

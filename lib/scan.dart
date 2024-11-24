@@ -5,8 +5,8 @@ import 'package:simple_edge_detection/edge_detection.dart';
 import 'package:flutter/material.dart';
 import 'package:simple_edge_detection/image_view.dart';
 import 'package:simple_edge_detection/tlc.dart';
-import 'edge_detector.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:simple_edge_detection/edge_detector.dart';
 
 class Scan extends StatefulWidget {
   final String imagePath;
@@ -44,6 +44,26 @@ class ScanState extends State<Scan> {
             }
           },
         ),
+        actions: [
+          imagePath != null
+              ? TextButton(
+                  onPressed: () {
+                    if (croppedImagePath == null) {
+                      _processImage(imagePath!, edgeDetectionResult!);
+                    }
+
+                    setState(() {
+                      imagePath = null;
+                      edgeDetectionResult = null;
+                      croppedImagePath = null;
+                    });
+                  },
+                  child: Text(
+                    "Crop &  Process",
+                  ),
+                )
+              : Container(),
+        ],
       ),
       body: Stack(
         children: <Widget>[
@@ -78,30 +98,6 @@ class ScanState extends State<Scan> {
     super.dispose();
   }
 
-  Widget _getButtonRow() {
-    if (imagePath != null) {
-      return Align(
-        alignment: Alignment.bottomCenter,
-        child: FloatingActionButton(
-          child: Icon(Icons.check),
-          onPressed: () {
-            if (croppedImagePath == null) {
-              _processImage(imagePath!, edgeDetectionResult!);
-            }
-
-            setState(() {
-              imagePath = null;
-              edgeDetectionResult = null;
-              croppedImagePath = null;
-            });
-          },
-        ),
-      );
-    } else {
-      return Container();
-    }
-  }
-
   Future _detectEdges(String filePath) async {
     if (!mounted) {
       return;
@@ -113,6 +109,14 @@ class ScanState extends State<Scan> {
 
     try {
       EdgeDetectionResult result = await EdgeDetector().detectEdges(filePath);
+      if (result.bottomLeft.dx == 0) {
+        result = EdgeDetectionResult(
+          topLeft: Offset(0.25, 0.25),
+          topRight: Offset(0.75, 0.25),
+          bottomLeft: Offset(0.25, 0.75),
+          bottomRight: Offset(0.75, 0.75),
+        );
+      }
       setState(() {
         edgeDetectionResult = result;
       });
@@ -146,9 +150,7 @@ class ScanState extends State<Scan> {
       }
 
       String preCalc = await _saveProcessedImage(filePath);
-      print(preCalc);
       String savedImagePath = await TlcCalc.calculateTLC(File(preCalc));
-      print(savedImagePath);
       setState(() {
         imageCache.clearLiveImages();
         imageCache.clear();
@@ -189,7 +191,6 @@ class ScanState extends State<Scan> {
   Padding _getBottomBar() {
     return Padding(
         padding: EdgeInsets.only(bottom: 32),
-        child:
-            Align(alignment: Alignment.bottomCenter, child: _getButtonRow()));
+        child: Align(alignment: Alignment.bottomCenter, child: Container()));
   }
 }

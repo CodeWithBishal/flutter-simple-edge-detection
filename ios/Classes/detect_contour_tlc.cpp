@@ -143,10 +143,19 @@ std::pair<Mat, std::vector<Spot>> draw_results(const Mat& image, const std::vect
     return {result_img, spots};
 }
 
-void detect_contour_tlc(char *path) {
+bool detect_contour_tlc(char *path) {
     Mat img = imread(path);
     if (img.empty()) {
-        return;
+        return false;
+    }
+
+    //Check for black color
+    Mat hsvImage;
+    cvtColor(img, hsvImage, COLOR_BGR2HSV);
+    Mat mask;
+    inRange(hsvImage, Scalar(0, 0, 0), Scalar(180, 255, 50), mask); // Threshold for black color
+    if (countNonZero(mask) > 0) {
+        return false; // Return false if black color is found
     }
     
     auto [resized_img, blurred_image] = load_and_preprocess_image(img);
@@ -163,4 +172,5 @@ void detect_contour_tlc(char *path) {
     auto [result_img, spots] = draw_results(resized_img, rectangles, min_required_area, max_aspect_ratio);
     
     imwrite(image_path, result_img);
+    return true;
 }

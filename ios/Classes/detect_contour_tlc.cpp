@@ -2,6 +2,7 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 
 using namespace cv;
 
@@ -143,8 +144,8 @@ std::pair<Mat, std::vector<Spot>> draw_results(const Mat& image, const std::vect
     return {result_img, spots};
 }
 
-bool detect_contour_tlc(char *path) {
-    Mat img = imread(path);
+bool detect_contour_tlc(char *image_path) {
+    Mat img = imread(image_path);
     if (img.empty()) {
         return false;
     }
@@ -158,7 +159,7 @@ bool detect_contour_tlc(char *path) {
         return false; // Return false if black color is found
     }
     
-    auto [resized_img, blurred_image] = load_and_preprocess_image(img);
+    std::pair<Mat, Mat> preprocess_result = load_and_preprocess_image(img);
     Mat gradient_magnitude = compute_gradients(blurred_image);
     
     double initial_threshold = 50;
@@ -169,7 +170,7 @@ bool detect_contour_tlc(char *path) {
     std::vector<Rect> rectangles = find_contours(gradient_magnitude, initial_threshold, initial_min_area_threshold);
     rectangles = improved_nms(rectangles, 0.3);
     
-    auto [result_img, spots] = draw_results(resized_img, rectangles, min_required_area, max_aspect_ratio);
+    std::pair<Mat, std::vector<Spot>> results = draw_results(resized_img, rectangles, min_required_area, max_aspect_ratio);
     
     imwrite(image_path, result_img);
     return true;

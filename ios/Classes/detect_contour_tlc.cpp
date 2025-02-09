@@ -36,7 +36,7 @@ std::pair<Mat, Mat> load_and_preprocess_image(const Mat& img) {
     Mat blurred_image;
     GaussianBlur(gray_image, blurred_image, Size(5, 5), 0);
     
-    return {resized_img, blurred_image};
+    return std::make_pair(resized_img, blurred_image);
 }
 
 Mat compute_gradients(const Mat& blurred_image) {
@@ -81,7 +81,9 @@ std::vector<Rect> improved_nms(std::vector<Rect>& rectangles, double overlap_thr
     }
     
     std::vector<size_t> indices(rectangles.size());
-    std::iota(indices.begin(), indices.end(), 0);
+    for (size_t i = 0; i < indices.size(); ++i) {
+        indices[i] = i;
+    }
     
     std::sort(indices.begin(), indices.end(),
               [&areas](size_t i1, size_t i2) { return areas[i1] > areas[i2]; });
@@ -141,7 +143,7 @@ std::pair<Mat, std::vector<Spot>> draw_results(const Mat& image, const std::vect
         }
     }
     
-    return {result_img, spots};
+    return std::make_pair(result_img, spots);
 }
 
 bool detect_contour_tlc(char *image_path) {
@@ -160,6 +162,9 @@ bool detect_contour_tlc(char *image_path) {
     }
     
     std::pair<Mat, Mat> preprocess_result = load_and_preprocess_image(img);
+    Mat resized_img = preprocess_result.first;
+    Mat blurred_image = preprocess_result.second;
+    
     Mat gradient_magnitude = compute_gradients(blurred_image);
     
     double initial_threshold = 50;
@@ -171,7 +176,9 @@ bool detect_contour_tlc(char *image_path) {
     rectangles = improved_nms(rectangles, 0.3);
     
     std::pair<Mat, std::vector<Spot>> results = draw_results(resized_img, rectangles, min_required_area, max_aspect_ratio);
+    Mat result_img = results.first;
     
     imwrite(image_path, result_img);
+
     return true;
 }

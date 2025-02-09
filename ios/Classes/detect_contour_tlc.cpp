@@ -144,7 +144,7 @@ std::pair<Mat, std::vector<Spot>> draw_results(const Mat& image, const std::vect
 }
 
 void detect_contour_tlc(char *path) {
-    Mat img = imread(image_path);
+    Mat img = imread(path);
     if (img.empty()) {
         return;
     }

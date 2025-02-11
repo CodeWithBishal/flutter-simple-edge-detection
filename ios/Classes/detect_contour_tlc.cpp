@@ -152,14 +152,6 @@ bool detect_contour_tlc(char *image_path) {
         return false;
     }
 
-    //Check for black color
-    Mat hsvImage;
-    cvtColor(img, hsvImage, COLOR_BGR2HSV);
-    Mat mask;
-    inRange(hsvImage, Scalar(0, 0, 0), Scalar(180, 255, 50), mask); // Threshold for black color
-    if (countNonZero(mask) > 0) {
-        return false; // Return false if black color is found
-    }
     
     std::pair<Mat, Mat> preprocess_result = load_and_preprocess_image(img);
     Mat resized_img = preprocess_result.first;

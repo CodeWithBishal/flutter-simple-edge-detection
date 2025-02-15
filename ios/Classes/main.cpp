@@ -1,5 +1,5 @@
 extern "C" {
     __attribute__((visibility("default"))) __attribute__((used))
-    bool detect_contour_tlc(char *);
+    int detect_contour_tlc(char *, int baseline_y, int topline_y);
 }
 #include "detect_contour_tlc.cpp"

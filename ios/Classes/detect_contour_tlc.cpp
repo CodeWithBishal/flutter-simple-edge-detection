@@ -49,10 +49,19 @@ Mat compute_gradients(const Mat& blurred_image) {
     return gradient_magnitude;
 }
 
-std::vector<Rect> find_contours(const Mat& gradient_magnitude, double threshold, double min_area_threshold) {
+std::vector<Rect> find_contours(const Mat& gradient_magnitude, double threshold, 
+                               double min_area_threshold, int baseline_y = -1, int topline_y = -1) {
     Mat high_contrast_areas;
     cv::threshold(gradient_magnitude, high_contrast_areas, threshold, 255, THRESH_BINARY);
     high_contrast_areas.convertTo(high_contrast_areas, CV_8U);
+    
+    // If baseline and topline are provided, mask out areas outside the region
+    if (baseline_y != -1 && topline_y != -1) {
+        // Create a mask for the region between baseline and topline
+        Mat mask = Mat::zeros(high_contrast_areas.size(), CV_8U);
+        rectangle(mask, Point(0, topline_y), Point(mask.cols - 1, baseline_y), Scalar(255), -1);
+        high_contrast_areas = high_contrast_areas & mask;
+    }
     
     Mat kernel = getStructuringElement(MORPH_RECT, Size(3, 3));
     morphologyEx(high_contrast_areas, high_contrast_areas, MORPH_CLOSE, kernel);
@@ -60,12 +69,18 @@ std::vector<Rect> find_contours(const Mat& gradient_magnitude, double threshold,
     std::vector<std::vector<Point>> contours;
     std::vector<Rect> rectangles;
     
-    findContours(high_contrast_areas, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+    findContours(high_contrast_areas, contours, RETR_TREE, CHAIN_APPROX_SIMPLE);
     
     for (const auto& contour : contours) {
         double area = contourArea(contour);
         if (area > min_area_threshold) {
-            rectangles.push_back(boundingRect(contour));
+            Rect rect = boundingRect(contour);
+            
+            // Only include rectangles that are entirely within the baseline-topline region
+            if (baseline_y == -1 || topline_y == -1 || 
+                (rect.y >= topline_y && rect.y + rect.height <= baseline_y)) {
+                rectangles.push_back(rect);
+            }
         }
     }
     return rectangles;
@@ -111,51 +126,95 @@ std::vector<Rect> improved_nms(std::vector<Rect>& rectangles, double overlap_thr
 }
 
 std::pair<Mat, std::vector<Spot>> draw_results(const Mat& image, const std::vector<Rect>& rectangles, 
-                                              double min_required_area, double max_aspect_ratio) {
+                                              double min_required_area, double max_aspect_ratio,
+                                              int baseline_y = -1, int topline_y = -1) {
     Mat result_img = image.clone();
     std::vector<Spot> spots;
+    
+    // Calculate the range for Rf value
+    double bottom_position = (baseline_y != -1) ? baseline_y : image.rows;
+    double top_position = (topline_y != -1) ? topline_y : 0;
+    double total_distance = bottom_position - top_position;
     
     for (const auto& rect : rectangles) {
         double aspect_ratio = static_cast<double>(rect.width) / rect.height;
         double area = rect.area();
         
         if (aspect_ratio <= max_aspect_ratio && area > min_required_area) {
-            rectangle(result_img, rect, Scalar(0, 255, 0), 2);
-            
             int center_x = rect.x + rect.width / 2;
             int center_y = rect.y + rect.height / 2;
             
-            circle(result_img, Point(center_x, center_y), 2, Scalar(0, 0, 255), -1);
-            
-            double rf_value = 1.0 - static_cast<double>(center_y) / 500;
-            spots.push_back({center_x, center_y, rf_value});
-            
-            std::string text = format("%.3f", rf_value);
-            int font_face = FONT_HERSHEY_SIMPLEX;
-            double font_scale = 0.4;
-            int thickness = 1;
-            
-            int baseline = 0;
-            Size text_size = getTextSize(text, font_face, font_scale, thickness, &baseline);
-            
-            Point text_org(center_x - text_size.width / 2, center_y + 15);
-            putText(result_img, text, text_org, font_face, font_scale, Scalar(255, 0, 0), thickness);
+            // Only process spots between baseline and topline when provided
+            if (baseline_y == -1 || topline_y == -1 || 
+                (center_y >= topline_y && center_y <= baseline_y)) {
+                
+                rectangle(result_img, rect, Scalar(0, 255, 0), 2);
+                circle(result_img, Point(center_x, center_y), 2, Scalar(0, 0, 255), -1);
+                
+                // Calculate Rf value based on provided lines
+                double rf_value;
+                if (baseline_y != -1 && topline_y != -1) {
+                    rf_value = (bottom_position - center_y) / total_distance;
+                } else {
+                    rf_value = 1.0 - static_cast<double>(center_y) / 500;
+                }
+                
+                spots.push_back({center_x, center_y, rf_value});
+                
+                std::string text = format("%.3f", rf_value);
+                int font_face = FONT_HERSHEY_SIMPLEX;
+                double font_scale = 0.4;
+                int thickness = 1;
+                
+                int baseline = 0;
+                Size text_size = getTextSize(text, font_face, font_scale, thickness, &baseline);
+                
+                Point text_org(center_x - text_size.width / 2, center_y + 15);
+                putText(result_img, text, text_org, font_face, font_scale, Scalar(255, 0, 0), thickness);
+            }
         }
     }
     
     return std::make_pair(result_img, spots);
 }
 
-bool detect_contour_tlc(char *image_path) {
+int detect_contour_tlc(char *image_path, int baseline_y, int topline_y) {
     Mat img = imread(image_path);
     if (img.empty()) {
-        return false;
+        return 0;
     }
-
     
+    // Get preprocessing results
     std::pair<Mat, Mat> preprocess_result = load_and_preprocess_image(img);
     Mat resized_img = preprocess_result.first;
     Mat blurred_image = preprocess_result.second;
+    
+    // Calculate scaling factors for both dimensions
+    double scale_y = static_cast<double>(resized_img.rows) / img.rows;
+    double scale_x = static_cast<double>(resized_img.cols) / img.cols;
+    
+    // Scale the baseline and topline positions according to the resized image
+    double crop_compensation = 0.05;
+    int scaled_baseline_y = -1;
+    int scaled_topline_y = -1;
+    
+    if (baseline_y != -1) {
+        double compensated_y = (baseline_y / (1.0 - 2 * crop_compensation)) - (img.rows * crop_compensation);
+        scaled_baseline_y = static_cast<int>(compensated_y * scale_y);
+    }
+    
+    if (topline_y != -1) {
+        double compensated_y = (topline_y / (1.0 - 2 * crop_compensation)) - (img.rows * crop_compensation);
+        scaled_topline_y = static_cast<int>(compensated_y * scale_y);
+    }
+    
+    // Ensure the scaled positions are within bounds
+    if (scaled_baseline_y != -1) {
+        scaled_baseline_y = std::min(std::max(scaled_baseline_y, 0), resized_img.rows - 1);
+    }
+    if (scaled_topline_y != -1) {
+        scaled_topline_y = std::min(std::max(scaled_topline_y, 0), resized_img.rows - 1);
+    }
     
     Mat gradient_magnitude = compute_gradients(blurred_image);
     
@@ -164,13 +223,31 @@ bool detect_contour_tlc(char *image_path) {
     double min_required_area = 250;
     double max_aspect_ratio = 3;
     
-    std::vector<Rect> rectangles = find_contours(gradient_magnitude, initial_threshold, initial_min_area_threshold);
+    // Draw the lines with proper position compensation
+    if (scaled_baseline_y != -1) {
+        line(resized_img, Point(0, scaled_baseline_y), 
+             Point(resized_img.cols - 1, scaled_baseline_y),
+             Scalar(0, 0, 255), 2); // Red line for baseline
+    }
+    
+    if (scaled_topline_y != -1) {
+        line(resized_img, Point(0, scaled_topline_y), 
+             Point(resized_img.cols - 1, scaled_topline_y),
+             Scalar(255, 0, 0), 2); // Blue line for topline
+    }
+    
+    // Pass the scaled line positions to find_contours
+    std::vector<Rect> rectangles = find_contours(gradient_magnitude, initial_threshold, 
+                                               initial_min_area_threshold,
+                                               scaled_baseline_y, scaled_topline_y);
     rectangles = improved_nms(rectangles, 0.3);
     
-    std::pair<Mat, std::vector<Spot>> results = draw_results(resized_img, rectangles, min_required_area, max_aspect_ratio);
+    // Pass the scaled line positions to draw_results
+    std::pair<Mat, std::vector<Spot>> results = draw_results(resized_img, rectangles, 
+                                                            min_required_area, max_aspect_ratio,
+                                                            scaled_baseline_y, scaled_topline_y);
     Mat result_img = results.first;
     
     imwrite(image_path, result_img);
-
-    return true;
+    return 1;
 }

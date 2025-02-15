@@ -178,10 +178,10 @@ std::pair<Mat, std::vector<Spot>> draw_results(const Mat& image, const std::vect
     return std::make_pair(result_img, spots);
 }
 
-int detect_contour_tlc(char *image_path, int baseline_y, int topline_y) {
+const char* detect_contour_tlc(char *image_path, int baseline_y, int topline_y) {
     Mat img = imread(image_path);
     if (img.empty()) {
-        return 0;
+        return strdup("[]");
     }
     
     // Get preprocessing results
@@ -247,7 +247,19 @@ int detect_contour_tlc(char *image_path, int baseline_y, int topline_y) {
                                                             min_required_area, max_aspect_ratio,
                                                             scaled_baseline_y, scaled_topline_y);
     Mat result_img = results.first;
+    std::vector<Spot> spots = results.second;
     
     imwrite(image_path, result_img);
-    return 1;
+    
+    // Construct JSON string with RF values
+    std::string json = "[";
+    for (size_t i = 0; i < spots.size(); ++i) {
+        json += "{\"x\":" + std::to_string(spots[i].x) + 
+            ",\"y\":" + std::to_string(spots[i].y) + 
+            ",\"rf_value\":" + format("%.3f", spots[i].rf_value) + "}";
+        if (i < spots.size() - 1) json += ",";
+    }
+    json += "]";
+    
+    return strdup(json.c_str()); 
 }

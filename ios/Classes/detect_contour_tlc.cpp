@@ -218,10 +218,11 @@ const char* detect_contour_tlc(char *image_path, int baseline_y, int topline_y) 
     
     Mat gradient_magnitude = compute_gradients(blurred_image);
     
-    double initial_threshold = 50;
-    double initial_min_area_threshold = 200;
-    double min_required_area = 250;
-    double max_aspect_ratio = 3;
+    double initial_threshold = 40;  // Lowered from 50
+    double initial_min_area_threshold = 180;  // Lowered from 200
+    double min_required_area = 220;  // Lowered from 250
+    double max_aspect_ratio = 2.5;  // Slightly reduced from 3
+    
     
     // Draw the lines with proper position compensation
     if (scaled_baseline_y != -1) {

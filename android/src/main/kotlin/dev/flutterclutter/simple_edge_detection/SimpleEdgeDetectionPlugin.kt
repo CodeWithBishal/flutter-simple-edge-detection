@@ -1,15 +1,16 @@
 package dev.flutterclutter.simple_edge_detection
 
 import androidx.annotation.NonNull
+
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
-import io.flutter.plugin.common.PluginRegistry
+import io.flutter.plugin.common.PluginRegistry.Registrar
 
 /** SimpleEdgeDetectionPlugin */
-class SimpleEdgeDetectionPlugin: FlutterPlugin, MethodCallHandler {
+public class SimpleEdgeDetectionPlugin: FlutterPlugin, MethodCallHandler {
   /// The MethodChannel that will the communication between Flutter and native Android
   ///
   /// This local reference serves to register the plugin with the Flutter Engine and unregister it
@@ -17,7 +18,7 @@ class SimpleEdgeDetectionPlugin: FlutterPlugin, MethodCallHandler {
   private lateinit var channel : MethodChannel
 
   override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-    channel = MethodChannel(flutterPluginBinding.flutterEngine.dartExecutor.binaryMessenger, "simple_edge_detection")
+    channel = MethodChannel(flutterPluginBinding.getFlutterEngine().getDartExecutor(), "simple_edge_detection")
     channel.setMethodCallHandler(this)
   }
 
@@ -32,7 +33,7 @@ class SimpleEdgeDetectionPlugin: FlutterPlugin, MethodCallHandler {
   // in the same class.
   companion object {
     @JvmStatic
-    fun registerWith(registrar: PluginRegistry.Registrar) {
+    fun registerWith(registrar: Registrar) {
       val channel = MethodChannel(registrar.messenger(), "simple_edge_detection")
       channel.setMethodCallHandler(SimpleEdgeDetectionPlugin())
     }

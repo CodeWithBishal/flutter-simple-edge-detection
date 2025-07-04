@@ -2,10 +2,10 @@ group = "dev.flutterclutter.simple_edge_detection"
 version '1.0-SNAPSHOT'
 
 buildscript {
-    ext.kotlin_version = "1.8.22"
+    ext.kotlin_version = "1.9.10"
     repositories {
         google()
-        jcenter()
+        mavenCentral()
     }
 
     dependencies {
@@ -17,7 +17,7 @@ buildscript {
 rootProject.allprojects {
     repositories {
         google()
-        jcenter()
+        mavenCentral()
     }
 }
 
@@ -37,7 +37,7 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_1_8
+        jvmTarget = "1.8"
     }
 
     sourceSets {
@@ -47,9 +47,7 @@ android {
 
     defaultConfig {
         minSdk = 21
-    }
-
-    defaultConfig {
+        
         externalNativeBuild {
             cmake {
                 // Enabling exceptions, RTTI
@@ -69,6 +67,7 @@ android {
     }
 
     dependencies {
+        implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
         testImplementation("org.jetbrains.kotlin:kotlin-test")
         testImplementation("org.mockito:mockito-core:5.0.0")
     }

@@ -3,10 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 class EdgePainter extends CustomPainter {
-  EdgePainter({
-    required this.points,
-    required this.color
-  });
+  EdgePainter({required this.points, required this.color});
 
   final List<Offset> points;
   final Color color;
@@ -14,7 +11,7 @@ class EdgePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = color.withOpacity(0.5)
+      ..color = color.withValues(alpha: 0.5)
       ..strokeWidth = 2
       ..strokeCap = StrokeCap.round;
 

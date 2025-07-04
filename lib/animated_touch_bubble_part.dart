@@ -27,8 +27,9 @@ class AnimatedTouchBubblePartState extends State<AnimatedTouchBubblePart>
     _sizeAnimation = Tween<double>(begin: 0.5, end: 1.0).animate(_controller);
 
     _colorAnimation = ColorTween(
-            begin: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
-            end: Theme.of(context).colorScheme.secondary.withOpacity(0.0))
+            begin:
+                Theme.of(context).colorScheme.secondary.withValues(alpha: 0.5),
+            end: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.0))
         .animate(
             CurvedAnimation(parent: _controller, curve: Interval(0.5, 1.0)));
 
@@ -54,7 +55,7 @@ class AnimatedTouchBubblePartState extends State<AnimatedTouchBubblePart>
                     color: Theme.of(context)
                         .colorScheme
                         .secondary
-                        .withOpacity(0.5),
+                        .withValues(alpha: 0.5),
                     borderRadius: widget.dragging
                         ? BorderRadius.circular(widget.size)
                         : BorderRadius.circular(widget.size / 4)))),

@@ -4,7 +4,6 @@ import 'package:simple_edge_detection/cropping_preview.dart';
 import 'package:simple_edge_detection/edge_detection.dart';
 import 'package:flutter/material.dart';
 import 'package:simple_edge_detection/image_view.dart';
-import 'package:simple_edge_detection/tlc.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:simple_edge_detection/edge_detector.dart';
 
@@ -149,8 +148,9 @@ class ScanState extends State<Scan> {
         return;
       }
 
-      String preCalc = await _saveProcessedImage(filePath);
-      String savedImagePath = await TlcCalc.calculateTLC(File(preCalc));
+      await _saveProcessedImage(filePath);
+      // String savedImagePath = await TlcCalc.calculateTLC(File(preCalc));
+      String savedImagePath = "";
       setState(() {
         imageCache.clearLiveImages();
         imageCache.clear();

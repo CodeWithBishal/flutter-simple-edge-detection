@@ -1,7 +1,6 @@
 package dev.flutterclutter.simple_edge_detection
 
-import androidx.annotation.NonNull;
-
+import androidx.annotation.NonNull
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -10,7 +9,7 @@ import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry.Registrar
 
 /** SimpleEdgeDetectionPlugin */
-public class SimpleEdgeDetectionPlugin: FlutterPlugin, MethodCallHandler {
+class SimpleEdgeDetectionPlugin: FlutterPlugin, MethodCallHandler {
   /// The MethodChannel that will the communication between Flutter and native Android
   ///
   /// This local reference serves to register the plugin with the Flutter Engine and unregister it
@@ -18,8 +17,8 @@ public class SimpleEdgeDetectionPlugin: FlutterPlugin, MethodCallHandler {
   private lateinit var channel : MethodChannel
 
   override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-    channel = MethodChannel(flutterPluginBinding.getFlutterEngine().getDartExecutor(), "simple_edge_detection")
-    channel.setMethodCallHandler(this);
+    channel = MethodChannel(flutterPluginBinding.flutterEngine.dartExecutor.binaryMessenger, "simple_edge_detection")
+    channel.setMethodCallHandler(this)
   }
 
   // This static function is optional and equivalent to onAttachedToEngine. It supports the old

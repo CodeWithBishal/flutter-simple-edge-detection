@@ -6,7 +6,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
-import io.flutter.plugin.common.PluginRegistry.Registrar
+import io.flutter.plugin.common.PluginRegistry
 
 /** SimpleEdgeDetectionPlugin */
 class SimpleEdgeDetectionPlugin: FlutterPlugin, MethodCallHandler {
@@ -32,7 +32,7 @@ class SimpleEdgeDetectionPlugin: FlutterPlugin, MethodCallHandler {
   // in the same class.
   companion object {
     @JvmStatic
-    fun registerWith(registrar: Registrar) {
+    fun registerWith(registrar: PluginRegistry.Registrar) {
       val channel = MethodChannel(registrar.messenger(), "simple_edge_detection")
       channel.setMethodCallHandler(SimpleEdgeDetectionPlugin())
     }

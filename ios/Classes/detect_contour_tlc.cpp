@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <cstring>
+#include <sstream>
 
 using namespace cv;
 
@@ -55,9 +57,7 @@ std::vector<Rect> find_contours(const Mat& gradient_magnitude, double threshold,
     cv::threshold(gradient_magnitude, high_contrast_areas, threshold, 255, THRESH_BINARY);
     high_contrast_areas.convertTo(high_contrast_areas, CV_8U);
     
-    // If baseline and topline are provided, mask out areas outside the region
     if (baseline_y != -1 && topline_y != -1) {
-        // Create a mask for the region between baseline and topline
         Mat mask = Mat::zeros(high_contrast_areas.size(), CV_8U);
         rectangle(mask, Point(0, topline_y), Point(mask.cols - 1, baseline_y), Scalar(255), -1);
         high_contrast_areas = high_contrast_areas & mask;
@@ -75,8 +75,6 @@ std::vector<Rect> find_contours(const Mat& gradient_magnitude, double threshold,
         double area = contourArea(contour);
         if (area > min_area_threshold) {
             Rect rect = boundingRect(contour);
-            
-            // Only include rectangles that are entirely within the baseline-topline region
             if (baseline_y == -1 || topline_y == -1 || 
                 (rect.y >= topline_y && rect.y + rect.height <= baseline_y)) {
                 rectangles.push_back(rect);
@@ -125,13 +123,13 @@ std::vector<Rect> improved_nms(std::vector<Rect>& rectangles, double overlap_thr
     return picked;
 }
 
+// Standard draw_results — used by the original detect_contour_tlc
 std::pair<Mat, std::vector<Spot>> draw_results(const Mat& image, const std::vector<Rect>& rectangles, 
                                               double min_required_area, double max_aspect_ratio,
                                               int baseline_y = -1, int topline_y = -1) {
     Mat result_img = image.clone();
     std::vector<Spot> spots;
     
-    // Calculate the range for Rf value
     double bottom_position = (baseline_y != -1) ? baseline_y : image.rows;
     double top_position = (topline_y != -1) ? topline_y : 0;
     double total_distance = bottom_position - top_position;
@@ -144,14 +142,12 @@ std::pair<Mat, std::vector<Spot>> draw_results(const Mat& image, const std::vect
             int center_x = rect.x + rect.width / 2;
             int center_y = rect.y + rect.height / 2;
             
-            // Only process spots between baseline and topline when provided
             if (baseline_y == -1 || topline_y == -1 || 
                 (center_y >= topline_y && center_y <= baseline_y)) {
                 
                 rectangle(result_img, rect, Scalar(0, 255, 0), 2);
                 circle(result_img, Point(center_x, center_y), 2, Scalar(0, 0, 255), -1);
                 
-                // Calculate Rf value based on provided lines
                 double rf_value;
                 if (baseline_y != -1 && topline_y != -1) {
                     rf_value = (bottom_position - center_y) / total_distance;
@@ -178,22 +174,159 @@ std::pair<Mat, std::vector<Spot>> draw_results(const Mat& image, const std::vect
     return std::make_pair(result_img, spots);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Helper: returns true if rect overlaps any manual box by more than threshold
+// ─────────────────────────────────────────────────────────────────────────────
+static bool rect_overlaps_manual(const Rect& r, const std::vector<Rect>& manual_rects,
+                                  double thresh = 0.10) {
+    for (const auto& m : manual_rects) {
+        Rect inter = r & m;
+        if (inter.area() <= 0) continue;
+        double overlap = static_cast<double>(inter.area()) /
+                         std::min(r.area(), m.area());
+        if (overlap > thresh) return true;
+    }
+    return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  draw_results_with_manual: draws auto-detected spots (green) and manual spots
+//  (magenta). Auto spots that overlap a manual box are suppressed to avoid
+//  double-drawing confusion. Manual spots always pass all filters.
+// ─────────────────────────────────────────────────────────────────────────────
+std::pair<Mat, std::vector<Spot>> draw_results_with_manual(
+        const Mat& image,
+        const std::vector<Rect>& auto_rects,
+        const std::vector<Rect>& manual_rects,
+        double min_required_area,
+        double max_aspect_ratio,
+        int baseline_y = -1,
+        int topline_y  = -1) {
+
+    Mat result_img = image.clone();
+    std::vector<Spot> spots;
+
+    double bottom_position = (baseline_y != -1) ? baseline_y : image.rows;
+    double top_position    = (topline_y  != -1) ? topline_y  : 0;
+    double total_distance  = bottom_position - top_position;
+
+    // Auto-detected rects — normal filter + suppress if covered by a manual box
+    for (const auto& rect : auto_rects) {
+        // Skip auto spots that overlap significantly with any manual annotation
+        if (rect_overlaps_manual(rect, manual_rects)) continue;
+
+        double aspect_ratio = static_cast<double>(rect.width) / rect.height;
+        double area = rect.area();
+
+        if (aspect_ratio <= max_aspect_ratio && area > min_required_area) {
+            int cx = rect.x + rect.width  / 2;
+            int cy = rect.y + rect.height / 2;
+
+            if (baseline_y == -1 || topline_y == -1 ||
+                (cy >= topline_y && cy <= baseline_y)) {
+
+                rectangle(result_img, rect, Scalar(0, 255, 0), 2);
+                circle(result_img, Point(cx, cy), 2, Scalar(0, 0, 255), -1);
+
+                double rf_value = (baseline_y != -1 && topline_y != -1)
+                    ? (bottom_position - cy) / total_distance
+                    : 1.0 - static_cast<double>(cy) / 500;
+
+                spots.push_back({cx, cy, rf_value});
+
+                std::string text = format("%.3f", rf_value);
+                int bsl = 0;
+                Size ts = getTextSize(text, FONT_HERSHEY_SIMPLEX, 0.4, 1, &bsl);
+                putText(result_img, text,
+                        Point(cx - ts.width / 2, cy + 15),
+                        FONT_HERSHEY_SIMPLEX, 0.4, Scalar(255, 0, 0), 1);
+            }
+        }
+    }
+
+    // Manual rects — always kept, drawn magenta with asterisk label
+    for (const auto& rect : manual_rects) {
+        int cx = std::min(std::max(rect.x + rect.width  / 2, 0), image.cols - 1);
+        int cy = std::min(std::max(rect.y + rect.height / 2, 0), image.rows - 1);
+
+        rectangle(result_img, rect, Scalar(255, 0, 255), 2);
+        circle(result_img, Point(cx, cy), 3, Scalar(0, 165, 255), -1);
+
+        double rf_value = (baseline_y != -1 && topline_y != -1)
+            ? (bottom_position - cy) / total_distance
+            : 1.0 - static_cast<double>(cy) / 500;
+
+        rf_value = std::min(std::max(rf_value, 0.0), 1.0);
+        spots.push_back({cx, cy, rf_value});
+
+        std::string text = format("%.3f*", rf_value);
+        int bsl = 0;
+        Size ts = getTextSize(text, FONT_HERSHEY_SIMPLEX, 0.4, 1, &bsl);
+        putText(result_img, text,
+                Point(cx - ts.width / 2, cy + 15),
+                FONT_HERSHEY_SIMPLEX, 0.4, Scalar(255, 0, 255), 1);
+    }
+
+    return std::make_pair(result_img, spots);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Minimal JSON parser: extracts one integer value by key from a flat JSON obj.
+// ─────────────────────────────────────────────────────────────────────────────
+static int json_get_int(const std::string& obj, const std::string& key) {
+    std::string search = "\"" + key + "\"";
+    size_t pos = obj.find(search);
+    if (pos == std::string::npos) return 0;
+    pos = obj.find(':', pos);
+    if (pos == std::string::npos) return 0;
+    ++pos;
+    while (pos < obj.size() && (obj[pos] == ' ' || obj[pos] == '\t')) ++pos;
+    return std::stoi(obj.substr(pos));
+}
+
+static std::vector<Rect> parse_manual_boxes(const char* json_str) {
+    std::vector<Rect> boxes;
+    if (!json_str || json_str[0] == '\0') return boxes;
+
+    std::string s(json_str);
+    size_t pos = 0;
+
+    while (pos < s.size()) {
+        size_t start = s.find('{', pos);
+        if (start == std::string::npos) break;
+        size_t end = s.find('}', start);
+        if (end == std::string::npos) break;
+
+        std::string obj = s.substr(start, end - start + 1);
+        int x1 = json_get_int(obj, "x1");
+        int y1 = json_get_int(obj, "y1");
+        int x2 = json_get_int(obj, "x2");
+        int y2 = json_get_int(obj, "y2");
+
+        if (x2 > x1 && y2 > y1) {
+            boxes.push_back(Rect(x1, y1, x2 - x1, y2 - y1));
+        }
+        pos = end + 1;
+    }
+    return boxes;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Original function — UNCHANGED for backward compatibility.
+// ─────────────────────────────────────────────────────────────────────────────
 const char* detect_contour_tlc(char *image_path, int baseline_y, int topline_y) {
     Mat img = imread(image_path);
     if (img.empty()) {
         return strdup("[]");
     }
     
-    // Get preprocessing results
     std::pair<Mat, Mat> preprocess_result = load_and_preprocess_image(img);
     Mat resized_img = preprocess_result.first;
     Mat blurred_image = preprocess_result.second;
     
-    // Calculate scaling factors for both dimensions
     double scale_y = static_cast<double>(resized_img.rows) / img.rows;
     double scale_x = static_cast<double>(resized_img.cols) / img.cols;
     
-    // Scale the baseline and topline positions according to the resized image
     double crop_compensation = 0.05;
     int scaled_baseline_y = -1;
     int scaled_topline_y = -1;
@@ -208,7 +341,6 @@ const char* detect_contour_tlc(char *image_path, int baseline_y, int topline_y) 
         scaled_topline_y = static_cast<int>(compensated_y * scale_y);
     }
     
-    // Ensure the scaled positions are within bounds
     if (scaled_baseline_y != -1) {
         scaled_baseline_y = std::min(std::max(scaled_baseline_y, 0), resized_img.rows - 1);
     }
@@ -218,32 +350,28 @@ const char* detect_contour_tlc(char *image_path, int baseline_y, int topline_y) 
     
     Mat gradient_magnitude = compute_gradients(blurred_image);
     
-    double initial_threshold = 40;  // Lowered from 50
-    double initial_min_area_threshold = 180;  // Lowered from 200
-    double min_required_area = 220;  // Lowered from 250
-    double max_aspect_ratio = 2.5;  // Slightly reduced from 3
+    double initial_threshold = 40;
+    double initial_min_area_threshold = 180;
+    double min_required_area = 220;
+    double max_aspect_ratio = 2.5;
     
-    
-    // Draw the lines with proper position compensation
     if (scaled_baseline_y != -1) {
         line(resized_img, Point(0, scaled_baseline_y), 
              Point(resized_img.cols - 1, scaled_baseline_y),
-             Scalar(0, 0, 255), 2); // Red line for baseline
+             Scalar(0, 0, 255), 2);
     }
     
     if (scaled_topline_y != -1) {
         line(resized_img, Point(0, scaled_topline_y), 
              Point(resized_img.cols - 1, scaled_topline_y),
-             Scalar(255, 0, 0), 2); // Blue line for topline
+             Scalar(255, 0, 0), 2);
     }
     
-    // Pass the scaled line positions to find_contours
     std::vector<Rect> rectangles = find_contours(gradient_magnitude, initial_threshold, 
                                                initial_min_area_threshold,
                                                scaled_baseline_y, scaled_topline_y);
     rectangles = improved_nms(rectangles, 0.3);
     
-    // Pass the scaled line positions to draw_results
     std::pair<Mat, std::vector<Spot>> results = draw_results(resized_img, rectangles, 
                                                             min_required_area, max_aspect_ratio,
                                                             scaled_baseline_y, scaled_topline_y);
@@ -252,7 +380,6 @@ const char* detect_contour_tlc(char *image_path, int baseline_y, int topline_y) 
     
     imwrite(image_path, result_img);
     
-    // Construct JSON string with RF values
     std::string json = "[";
     for (size_t i = 0; i < spots.size(); ++i) {
         json += "{\"x\":" + std::to_string(spots[i].x) + 
@@ -263,4 +390,101 @@ const char* detect_contour_tlc(char *image_path, int baseline_y, int topline_y) 
     json += "]";
     
     return strdup(json.c_str()); 
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  NEW: detect_contour_tlc_with_hints
+//
+//  Accepts a JSON array of manually annotated bounding boxes in original image
+//  pixel coordinates: [{"x1":10,"y1":20,"x2":50,"y2":60}, ...]
+//
+//  Scales them through the same crop+resize pipeline, merges with auto-detected
+//  rects, and draws both. Manual boxes bypass NMS and area/aspect filters.
+// ─────────────────────────────────────────────────────────────────────────────
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+const char* detect_contour_tlc_with_hints(
+        char* image_path,
+        int   baseline_y,
+        int   topline_y,
+        char* manual_boxes_json) {
+
+    Mat img = imread(image_path);
+    if (img.empty()) {
+        return strdup("[]");
+    }
+
+    // Preprocess
+    std::pair<Mat, Mat> preprocess_result = load_and_preprocess_image(img);
+    Mat resized_img   = preprocess_result.first;
+    Mat blurred_image = preprocess_result.second;
+
+    double scale_y = static_cast<double>(resized_img.rows) / img.rows;
+    double scale_x = static_cast<double>(resized_img.cols) / img.cols;
+    double crop_compensation = 0.05;
+
+    // Scale baseline / topline
+    int scaled_baseline_y = -1;
+    int scaled_topline_y  = -1;
+
+    if (baseline_y != -1) {
+        double cy = (baseline_y / (1.0 - 2 * crop_compensation)) - (img.rows * crop_compensation);
+        scaled_baseline_y = std::min(std::max(static_cast<int>(cy * scale_y), 0), resized_img.rows - 1);
+    }
+    if (topline_y != -1) {
+        double cy = (topline_y / (1.0 - 2 * crop_compensation)) - (img.rows * crop_compensation);
+        scaled_topline_y = std::min(std::max(static_cast<int>(cy * scale_y), 0), resized_img.rows - 1);
+    }
+
+    // Parse and scale manual boxes using the same crop compensation
+    std::vector<Rect> raw_manual = parse_manual_boxes(manual_boxes_json);
+    std::vector<Rect> scaled_manual;
+    for (const auto& r : raw_manual) {
+        double sx1 = (r.x / (1.0 - 2*crop_compensation) - img.cols*crop_compensation) * scale_x;
+        double sy1 = (r.y / (1.0 - 2*crop_compensation) - img.rows*crop_compensation) * scale_y;
+        double sx2 = ((r.x+r.width)  / (1.0 - 2*crop_compensation) - img.cols*crop_compensation) * scale_x;
+        double sy2 = ((r.y+r.height) / (1.0 - 2*crop_compensation) - img.rows*crop_compensation) * scale_y;
+
+        int ix1 = std::min(std::max(static_cast<int>(sx1), 0), resized_img.cols - 1);
+        int iy1 = std::min(std::max(static_cast<int>(sy1), 0), resized_img.rows - 1);
+        int ix2 = std::min(std::max(static_cast<int>(sx2), 0), resized_img.cols - 1);
+        int iy2 = std::min(std::max(static_cast<int>(sy2), 0), resized_img.rows - 1);
+
+        if (ix2 > ix1 && iy2 > iy1) {
+            scaled_manual.push_back(Rect(ix1, iy1, ix2 - ix1, iy2 - iy1));
+        }
+    }
+
+    // Auto-detect
+    Mat gradient_magnitude = compute_gradients(blurred_image);
+
+    if (scaled_baseline_y != -1) {
+        line(resized_img, Point(0, scaled_baseline_y),
+             Point(resized_img.cols - 1, scaled_baseline_y), Scalar(0, 0, 255), 2);
+    }
+    if (scaled_topline_y != -1) {
+        line(resized_img, Point(0, scaled_topline_y),
+             Point(resized_img.cols - 1, scaled_topline_y), Scalar(255, 0, 0), 2);
+    }
+
+    std::vector<Rect> auto_rects = find_contours(gradient_magnitude, 40, 180,
+                                                  scaled_baseline_y, scaled_topline_y);
+    auto_rects = improved_nms(auto_rects, 0.3);
+
+    // Merge and draw
+    std::pair<Mat, std::vector<Spot>> results =
+        draw_results_with_manual(resized_img, auto_rects, scaled_manual,
+                                  220, 2.5, scaled_baseline_y, scaled_topline_y);
+
+    imwrite(image_path, results.first);
+
+    std::string json = "[";
+    for (size_t i = 0; i < results.second.size(); ++i) {
+        json += "{\"x\":"        + std::to_string(results.second[i].x) +
+                ",\"y\":"        + std::to_string(results.second[i].y) +
+                ",\"rf_value\":" + format("%.3f", results.second[i].rf_value) + "}";
+        if (i < results.second.size() - 1) json += ",";
+    }
+    json += "]";
+
+    return strdup(json.c_str());
 }

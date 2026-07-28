@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:ffi/ffi.dart';
 import 'dart:ffi';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 class RfSpot {
@@ -25,6 +26,7 @@ class TlcCalc {
       ? DynamicLibrary.open("libnative_edge_detection.so")
       : DynamicLibrary.process();
 
+  // ── Original method (unchanged) ─────────────────────────────────────────────
   static Future<Map<String, dynamic>> calculateTLC(
     File imagePathToCalc,
     int baseLine,
@@ -32,20 +34,16 @@ class TlcCalc {
   ) async {
     final imagePath = imagePathToCalc.path.toNativeUtf8();
 
-    // Define the new FFI function that returns RF values
     final imageFfiWithRf = dylib.lookupFunction<
         Pointer<Utf8> Function(Pointer<Utf8>, Int32, Int32),
         Pointer<Utf8> Function(Pointer<Utf8>, int, int)>('detect_contour_tlc');
 
-    // Call the function and get the result
     final resultPointer = imageFfiWithRf(imagePath, baseLine, topLine);
     final jsonString = resultPointer.toDartString();
 
-    // Free the allocated memory
     calloc.free(resultPointer);
     calloc.free(imagePath);
 
-    // Parse the JSON string into a list of RfSpot objects
     List<RfSpot> spots = [];
     try {
       final List<dynamic> jsonList = json.decode(jsonString);
@@ -53,44 +51,69 @@ class TlcCalc {
           .map((item) => RfSpot.fromJson(item as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      print('Error parsing RF values: $e');
+      debugPrint('Error parsing RF values: $e');
     }
 
-    // Save the processed image
     File file = await saveImage(imagePathToCalc.path);
 
-    // Return both the file path and the RF values
-    print(spots[0].rfValue);
+    debugPrint(spots.isEmpty ? 'No spots detected' : 'First spot rf: ${spots[0].rfValue}');
     return {
       'filePath': file.path,
       'spots': spots,
     };
   }
 
-  // Keep the original method for backward compatibility
-  // static Future<String> calculateTLCOriginal(
-  //   File imagePathtoCalc,
-  //   int baseLine,
-  //   int topLine,
-  // ) async {
-  //   final imagePath = imagePathtoCalc.path.toNativeUtf8();
-  //   final imageFfi = dylib.lookupFunction<
-  //       Int32 Function(Pointer<Utf8>, Int32, Int32),
-  //       int Function(Pointer<Utf8>, int, int)>('detect_contour_tlc');
+  // ── NEW: calculateTLCWithHints ───────────────────────────────────────────────
+  /// Same as [calculateTLC] but also accepts a list of manually annotated
+  /// bounding boxes in original image pixel coordinates.
+  ///
+  /// Each box is `{'x1': int, 'y1': int, 'x2': int, 'y2': int}`.
+  /// These are serialised to JSON and forwarded to the C++ function
+  /// `detect_contour_tlc_with_hints`, which merges them with auto-detected
+  /// spots before computing Rf values.
+  static Future<Map<String, dynamic>> calculateTLCWithHints(
+    File imagePathToCalc,
+    int baseLine,
+    int topLine,
+    List<Map<String, int>> manualBoxes,
+  ) async {
+    // If no manual boxes provided, fall back to the standard call
+    if (manualBoxes.isEmpty) {
+      return calculateTLC(imagePathToCalc, baseLine, topLine);
+    }
 
-  //   final int result = imageFfi(imagePath, baseLine, topLine);
+    final imagePath = imagePathToCalc.path.toNativeUtf8();
+    final boxesJson = json.encode(manualBoxes).toNativeUtf8();
 
-  //   print('Result: $result');
+    final ffiFunc = dylib.lookupFunction<
+        Pointer<Utf8> Function(Pointer<Utf8>, Int32, Int32, Pointer<Utf8>),
+        Pointer<Utf8> Function(
+            Pointer<Utf8>, int, int, Pointer<Utf8>)>('detect_contour_tlc_with_hints');
 
-  //   calloc.free(imagePath);
+    final resultPointer = ffiFunc(imagePath, baseLine, topLine, boxesJson);
+    final jsonString = resultPointer.toDartString();
 
-  //   if (result != 0) {
-  //     File file = await saveImage(imagePathtoCalc.path);
-  //     return file.path;
-  //   } else {
-  //     return imagePathtoCalc.path;
-  //   }
-  // }
+    calloc.free(resultPointer);
+    calloc.free(imagePath);
+    calloc.free(boxesJson);
+
+    List<RfSpot> spots = [];
+    try {
+      final List<dynamic> jsonList = json.decode(jsonString);
+      spots = jsonList
+          .map((item) => RfSpot.fromJson(item as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('Error parsing RF values (with hints): $e');
+    }
+
+    File file = await saveImage(imagePathToCalc.path);
+
+    return {
+      'filePath': file.path,
+      'spots': spots,
+    };
+  }
 
   static Future<File> saveImage(String filePath) async {
     final directory = await getApplicationDocumentsDirectory();
